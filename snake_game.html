@@ -1,0 +1,747 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>2-Player Snake</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width:100%; height:100%; overflow:hidden; background:#0d0d1a; font-family:'Segoe UI',sans-serif; color:#fff; user-select:none; }
+    #topbar {
+      position:fixed; top:0; left:0; right:0; height:56px;
+      display:flex; align-items:center; justify-content:center; gap:40px;
+      background:rgba(13,13,26,0.92); backdrop-filter:blur(6px);
+      border-bottom:1px solid rgba(255,255,255,0.07); z-index:20;
+    }
+    #topbar h1 {
+      font-size:1.2rem; letter-spacing:4px; text-transform:uppercase; flex:0 0 auto;
+      background:linear-gradient(90deg,#00ff88,#00aaff);
+      -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+    }
+    .score-box { display:flex; align-items:center; gap:10px; padding:5px 18px; border-radius:8px; }
+    .score-box.p1 { background:rgba(0,255,136,0.1); border:1.5px solid #00ff88; }
+    .score-box.p2 { background:rgba(0,170,255,0.1); border:1.5px solid #00aaff; }
+    .score-box .name { font-weight:bold; font-size:0.85rem; opacity:0.8; }
+    .score-box .pts  { font-size:1.5rem; font-weight:bold; min-width:36px; text-align:center; }
+    .score-box .keys { font-size:0.65rem; opacity:0.45; }
+    #canvas { display:block; position:fixed; top:56px; left:0; }
+    #overlay {
+      position:fixed; inset:0; display:flex; flex-direction:column;
+      align-items:center; justify-content:center; gap:12px;
+      z-index:30; background:rgba(13,13,26,0.82); backdrop-filter:blur(4px);
+    }
+    #overlay h2 { font-size:2.4rem; letter-spacing:2px; }
+    #overlay p  { opacity:0.65; font-size:0.9rem; }
+    .legend { display:flex; flex-wrap:wrap; gap:10px 20px; justify-content:center; max-width:700px; margin-top:4px; font-size:0.82rem; opacity:0.72; }
+    .legend span { display:flex; align-items:center; gap:5px; }
+    button {
+      padding:12px 44px; font-size:1rem; border:none; border-radius:8px;
+      cursor:pointer; font-weight:bold; letter-spacing:1px;
+      background:linear-gradient(90deg,#00ff88,#00aaff);
+      color:#000; transition:transform 0.1s; margin-top:6px;
+    }
+    button:hover { transform:scale(1.05); }
+  </style>
+</head>
+<body>
+  <div id="topbar">
+    <div class="score-box p1">
+      <div><div class="name">Player 1</div><div class="keys">W A S D</div></div>
+      <div class="pts" id="s1">0</div>
+    </div>
+    <h1>Snake Battle</h1>
+    <div class="score-box p2">
+      <div class="pts" id="s2">0</div>
+      <div><div class="name">Player 2</div><div class="keys">Arrow Keys</div></div>
+    </div>
+  </div>
+
+  <canvas id="canvas"></canvas>
+
+  <div id="overlay">
+    <h2 id="overlay-title">Snake Battle</h2>
+    <p id="overlay-msg">First to 100 points wins!</p>
+    <div class="legend">
+      <span>⚡ Speed — move faster</span>
+      <span>🗡️ Dagger — kill on body touch</span>
+      <span>🔦 Flashlight — see your path</span>
+      <span>🧱 Wall — opponent can't wrap</span>
+      <span>🐡 Fat — your body is wider</span>
+      <span>🐙 Tentacles — wavy arms eat dots &amp; kill</span>
+    </div>
+    <button id="start-btn">START GAME</button>
+  </div>
+
+<script>
+const canvas       = document.getElementById('canvas');
+const ctx          = canvas.getContext('2d');
+const overlay      = document.getElementById('overlay');
+const startBtn     = document.getElementById('start-btn');
+const overlayTitle = document.getElementById('overlay-title');
+const overlayMsg   = document.getElementById('overlay-msg');
+const s1El = document.getElementById('s1');
+const s2El = document.getElementById('s2');
+
+// ─── Constants ─────────────────────────────────────────────────────────────
+const GRID             = 22;
+const WIN_SCORE        = 100;
+const BASE_SPEED       = 115;
+const BOOST_SPEED      = 52;
+const POWERUP_DURATION = 10000;   // 10 s
+const SPECIAL_INTERVAL = 6000;    // new special every 6 s (shorter for testing)
+const MAX_SPECIAL      = 12;      // many on screen for testing
+const FOOD_TARGET      = 12;      // keep this many regular dots on screen
+const MAX_LOG          = 8;
+
+const SPECIAL_TYPES = ['speed','dagger','flash','wall','fat','tentacles'];
+
+let COLS, ROWS;
+let gameRunning = false;
+let animFrame;
+let lastSpecialSpawn = 0;
+
+// ─── P-key test mode (P2 gets a permanent power-up, rotates on each press) ──
+const PERM = Infinity; // never expires
+const TEST_CYCLE = ['speed','dagger','flash','wall','fat','tentacles','none'];
+let p2TestIdx = -1; // index into TEST_CYCLE; -1 = no test active
+
+function applyP2Test() {
+  if (!p2) return;
+  // Clear all P2 power-ups and any wall applied to P1
+  p2.powerups.speed = p2.powerups.dagger = p2.powerups.flash = 0;
+  p2.powerups.fat   = p2.powerups.tentacles = p2.powerups.wallBlocked = 0;
+  p2.moveInterval = BASE_SPEED;
+  p1.powerups.wallBlocked = 0;
+
+  const type = TEST_CYCLE[p2TestIdx];
+  switch (type) {
+    case 'speed':     p2.powerups.speed     = PERM; p2.moveInterval = BOOST_SPEED; break;
+    case 'dagger':    p2.powerups.dagger    = PERM; break;
+    case 'flash':     p2.powerups.flash     = PERM; break;
+    case 'fat':       p2.powerups.fat       = PERM; break;
+    case 'tentacles': p2.powerups.tentacles = PERM; break;
+    case 'wall':      p1.powerups.wallBlocked = PERM; break; // wall blocks P1
+    case 'none': break; // reset
+  }
+}
+
+function cycleP2Test() {
+  if (!gameRunning || !p2) return;
+  p2TestIdx = (p2TestIdx + 1) % TEST_CYCLE.length;
+  applyP2Test();
+}
+
+// ─── Canvas resize ──────────────────────────────────────────────────────────
+function resizeCanvas() {
+  canvas.width  = Math.floor(window.innerWidth         / GRID) * GRID;
+  canvas.height = Math.floor((window.innerHeight - 56) / GRID) * GRID;
+  canvas.style.width  = canvas.width  + 'px';
+  canvas.style.height = canvas.height + 'px';
+  COLS = canvas.width  / GRID;
+  ROWS = canvas.height / GRID;
+}
+resizeCanvas();
+window.addEventListener('resize', () => { resizeCanvas(); if (!gameRunning) draw(0); });
+
+// ─── Snake factory ──────────────────────────────────────────────────────────
+function makeSnake(x, y, color, shadowColor, dx, dy) {
+  return {
+    body: [{x, y}, {x: x-dx, y: y-dy}],
+    dx, dy, nextDx: dx, nextDy: dy,
+    color, shadowColor,
+    score: 0, alive: true, grow: 0,
+    moveInterval: BASE_SPEED, lastMove: 0,
+    powerups: {
+      speed: 0, dagger: 0, flash: 0,
+      fat: 0, tentacles: 0,
+      wallBlocked: 0,  // set by opponent eating 'wall'
+    },
+  };
+}
+
+let p1, p2, foods, specialFoods;
+const inputLog = { p1: [], p2: [] };
+
+function initGame(ts = 0) {
+  const midY = Math.floor(ROWS / 2);
+  p1 = makeSnake(Math.floor(COLS*0.25), midY, '#00ff88', '#00ff8888',  1, 0);
+  p2 = makeSnake(Math.floor(COLS*0.75), midY, '#00aaff', '#00aaff88', -1, 0);
+  p1.lastMove = p2.lastMove = ts;
+  foods = []; specialFoods = [];
+  inputLog.p1 = []; inputLog.p2 = [];
+  lastSpecialSpawn = ts;
+  p2TestIdx = -1;
+
+  // Fill regular food
+  while (foods.length < FOOD_TARGET) spawnFood();
+
+  // Spawn at least one of each special type for testing
+  for (const type of SPECIAL_TYPES) {
+    const pos = randomCell();
+    pos.type = type; pos.spawnedAt = ts;
+    specialFoods.push(pos);
+  }
+}
+
+// ─── Food helpers ───────────────────────────────────────────────────────────
+function isCellOccupied(x, y) {
+  for (const s of [p1, p2])
+    if (s && s.body.some(b => b.x === x && b.y === y)) return true;
+  if (foods.some(f => f.x === x && f.y === y)) return true;
+  if (specialFoods.some(f => f.x === x && f.y === y)) return true;
+  return false;
+}
+
+function randomCell() {
+  let pos, t = 0;
+  do { pos = {x: Math.floor(Math.random()*COLS), y: Math.floor(Math.random()*ROWS)}; t++; }
+  while (t < 300 && isCellOccupied(pos.x, pos.y));
+  return pos;
+}
+
+function spawnFood() {
+  const pos = randomCell();
+  const hues = ['#ff4466','#ffcc00','#ff8800','#ff44ff','#ffffff','#aaffcc'];
+  pos.color = hues[Math.floor(Math.random()*hues.length)];
+  foods.push(pos);
+}
+
+function spawnSpecial(ts) {
+  if (specialFoods.length >= MAX_SPECIAL) return;
+  const pos = randomCell();
+  pos.type = SPECIAL_TYPES[Math.floor(Math.random()*SPECIAL_TYPES.length)];
+  pos.spawnedAt = ts;
+  specialFoods.push(pos);
+  lastSpecialSpawn = ts;
+}
+
+function checkFood(snake, ts) {
+  const {x, y} = snake.body[0];
+  const opponent = snake === p1 ? p2 : p1;
+
+  // Regular food
+  for (let i = foods.length-1; i >= 0; i--) {
+    if (foods[i].x === x && foods[i].y === y) {
+      foods.splice(i, 1);
+      snake.score++;
+      snake.grow += 3;
+      spawnFood();
+      return;
+    }
+  }
+
+  // Special food
+  for (let i = specialFoods.length-1; i >= 0; i--) {
+    const sf = specialFoods[i];
+    if (sf.x === x && sf.y === y) {
+      specialFoods.splice(i, 1);
+      const exp = ts + POWERUP_DURATION;
+      switch (sf.type) {
+        case 'speed':     snake.powerups.speed    = exp; snake.moveInterval = BOOST_SPEED; break;
+        case 'dagger':    snake.powerups.dagger   = exp; break;
+        case 'flash':     snake.powerups.flash    = exp; break;
+        case 'fat':       snake.powerups.fat      = exp; break;
+        case 'tentacles': snake.powerups.tentacles= exp; break;
+        case 'wall':      opponent.powerups.wallBlocked = exp; break; // affects OPPONENT
+      }
+    }
+  }
+}
+
+function checkPowerupExpiry(ts) {
+  for (const s of [p1, p2]) {
+    if (s.powerups.speed       > 0 && ts >= s.powerups.speed)       { s.powerups.speed = 0; s.moveInterval = BASE_SPEED; }
+    if (s.powerups.dagger      > 0 && ts >= s.powerups.dagger)      { s.powerups.dagger      = 0; }
+    if (s.powerups.flash       > 0 && ts >= s.powerups.flash)       { s.powerups.flash       = 0; }
+    if (s.powerups.fat         > 0 && ts >= s.powerups.fat)         { s.powerups.fat         = 0; }
+    if (s.powerups.tentacles   > 0 && ts >= s.powerups.tentacles)   { s.powerups.tentacles   = 0; }
+    if (s.powerups.wallBlocked > 0 && ts >= s.powerups.wallBlocked) { s.powerups.wallBlocked = 0; }
+  }
+}
+
+// ─── Input ──────────────────────────────────────────────────────────────────
+function logPress(player, key, t) {
+  inputLog[player].unshift({key, pressedAt:t, resolvedAt:null, ms:null});
+  if (inputLog[player].length > MAX_LOG) inputLog[player].pop();
+}
+function resolveLog(player) {
+  const e = inputLog[player].find(e => !e.resolvedAt);
+  if (e) { e.resolvedAt = performance.now(); e.ms = Math.round(e.resolvedAt - e.pressedAt); }
+}
+
+window.addEventListener('keydown', e => {
+  if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key)) e.preventDefault();
+  if (e.key === 'p' || e.key === 'P') { cycleP2Test(); return; }
+  if (!gameRunning || !p1 || !p2) return;
+  const t = performance.now();
+  switch (e.key) {
+    case 'w': case 'W': if (p1.dy!== 1){p1.nextDx= 0;p1.nextDy=-1;logPress('p1','↑',t);} break;
+    case 's': case 'S': if (p1.dy!==-1){p1.nextDx= 0;p1.nextDy= 1;logPress('p1','↓',t);} break;
+    case 'a': case 'A': if (p1.dx!== 1){p1.nextDx=-1;p1.nextDy= 0;logPress('p1','←',t);} break;
+    case 'd': case 'D': if (p1.dx!==-1){p1.nextDx= 1;p1.nextDy= 0;logPress('p1','→',t);} break;
+    case 'ArrowUp':    if (p2.dy!== 1){p2.nextDx= 0;p2.nextDy=-1;logPress('p2','↑',t);} break;
+    case 'ArrowDown':  if (p2.dy!==-1){p2.nextDx= 0;p2.nextDy= 1;logPress('p2','↓',t);} break;
+    case 'ArrowLeft':  if (p2.dx!== 1){p2.nextDx=-1;p2.nextDy= 0;logPress('p2','←',t);} break;
+    case 'ArrowRight': if (p2.dx!==-1){p2.nextDx= 1;p2.nextDy= 0;logPress('p2','→',t);} break;
+  }
+});
+
+// ─── Movement ───────────────────────────────────────────────────────────────
+function moveSnake(snake, player) {
+  const prevDx = snake.dx, prevDy = snake.dy;
+  snake.dx = snake.nextDx; snake.dy = snake.nextDy;
+  if (snake.dx !== prevDx || snake.dy !== prevDy) resolveLog(player);
+
+  let newX = snake.body[0].x + snake.dx;
+  let newY = snake.body[0].y + snake.dy;
+
+  if (snake.powerups.wallBlocked > 0) {
+    // Walls are real — hitting a border kills this snake
+    if (newX < 0 || newX >= COLS || newY < 0 || newY >= ROWS) {
+      snake.alive = false;
+      return;
+    }
+  } else {
+    newX = (newX + COLS) % COLS;
+    newY = (newY + ROWS) % ROWS;
+  }
+
+  snake.body.unshift({x: newX, y: newY});
+  if (snake.grow > 0) { snake.grow--; } else { snake.body.pop(); }
+}
+
+// ─── Collision ──────────────────────────────────────────────────────────────
+// Get the per-segment direction (needed for tentacle perpendicular)
+function segDir(snake, i) {
+  if (i === 0) return {sdx: snake.dx, sdy: snake.dy};
+  let dx = snake.body[i-1].x - snake.body[i].x;
+  let dy = snake.body[i-1].y - snake.body[i].y;
+  if (dx >  1) dx = -1; else if (dx < -1) dx = 1;
+  if (dy >  1) dy = -1; else if (dy < -1) dy = 1;
+  return {sdx: dx, sdy: dy};
+}
+
+function checkSelfCollision(s) {
+  const {x, y} = s.body[0];
+  return s.body.slice(1).some(b => b.x === x && b.y === y);
+}
+
+function checkBodyCollision(mover, other) {
+  const hx = mover.body[0].x, hy = mover.body[0].y;
+  const r = other.powerups.fat > 0 ? 1 : 0; // fat snake has bigger hitbox
+  return other.body.some(b => Math.abs(b.x-hx) <= r && Math.abs(b.y-hy) <= r);
+}
+
+function checkHeadCollision(a, b) {
+  return a.body[0].x === b.body[0].x && a.body[0].y === b.body[0].y;
+}
+
+function checkCollisions() {
+  if (checkHeadCollision(p1, p2)) {
+    const d1 = p1.powerups.dagger > 0, d2 = p2.powerups.dagger > 0;
+    if      (d1 && !d2) p2.alive = false;
+    else if (d2 && !d1) p1.alive = false;
+    else                { p1.alive = false; p2.alive = false; }
+    return;
+  }
+  if (checkSelfCollision(p1)) p1.alive = false;
+  if (checkSelfCollision(p2)) p2.alive = false;
+  if (p1.alive && checkBodyCollision(p1, p2)) { if (p1.powerups.dagger>0) p2.alive=false; else p1.alive=false; }
+  if (p2.alive && checkBodyCollision(p2, p1)) { if (p2.powerups.dagger>0) p1.alive=false; else p2.alive=false; }
+}
+
+// Tentacle tips — returns array of {x, y} grid cells
+function getTentacleTips(snake, ts) {
+  if (!snake.powerups.tentacles) return [];
+  const tips = [];
+  for (let i = 0; i < snake.body.length; i += 2) {
+    const seg = snake.body[i];
+    const {sdx, sdy} = segDir(snake, i);
+    const px = -sdy, py = sdx;           // perpendicular to travel
+    const wave = Math.sin(ts/160 + i*0.9);
+    const len  = 2.2 + wave * 0.5;
+    // wave offset along travel direction so it looks wavy
+    const wx = sdx * wave * 0.6, wy = sdy * wave * 0.6;
+    for (const side of [1, -1]) {
+      const tx = Math.round(seg.x + px*side*len + wx);
+      const ty = Math.round(seg.y + py*side*len + wy);
+      if (tx >= 0 && tx < COLS && ty >= 0 && ty < ROWS) tips.push({x:tx, y:ty});
+    }
+  }
+  return tips;
+}
+
+function checkTentacleCollisions(snake, other, ts) {
+  if (!snake.powerups.tentacles) return;
+  const tips = getTentacleTips(snake, ts);
+  for (const tip of tips) {
+    // Eat regular food
+    for (let fi = foods.length-1; fi >= 0; fi--) {
+      if (foods[fi].x === tip.x && foods[fi].y === tip.y) {
+        foods.splice(fi, 1); snake.score++; spawnFood();
+      }
+    }
+    // Eat special food (just points, no power-up activation via tentacle)
+    for (let fi = specialFoods.length-1; fi >= 0; fi--) {
+      if (specialFoods[fi].x === tip.x && specialFoods[fi].y === tip.y) {
+        specialFoods.splice(fi, 1); snake.score += 2; // worth 2 pts — it's a special dot
+      }
+    }
+    // Kill other snake
+    if (other.alive && other.body.some(b => b.x === tip.x && b.y === tip.y)) {
+      other.alive = false;
+    }
+  }
+}
+
+// ─── Draw ────────────────────────────────────────────────────────────────────
+function drawGrid() {
+  ctx.strokeStyle = 'rgba(255,255,255,0.025)'; ctx.lineWidth = 0.5;
+  for (let x=0; x<=COLS; x++) { ctx.beginPath(); ctx.moveTo(x*GRID,0); ctx.lineTo(x*GRID,canvas.height); ctx.stroke(); }
+  for (let y=0; y<=ROWS; y++) { ctx.beginPath(); ctx.moveTo(0,y*GRID); ctx.lineTo(canvas.width,y*GRID); ctx.stroke(); }
+}
+
+// Glowing red border when a snake is wall-blocked
+function drawWallBorder(ts) {
+  const blocked = [];
+  if (p1.powerups.wallBlocked > 0) blocked.push({s:p1, label:'P1 WALLED'});
+  if (p2.powerups.wallBlocked > 0) blocked.push({s:p2, label:'P2 WALLED'});
+  if (!blocked.length) return;
+
+  const pulse = 0.5 + 0.5 * Math.sin(ts / 120);
+  const thickness = 6 + pulse * 4;
+
+  ctx.save();
+  ctx.strokeStyle = `rgba(255,60,0,${0.6 + 0.4*pulse})`;
+  ctx.shadowColor = '#ff3300';
+  ctx.shadowBlur  = 20 * pulse;
+  ctx.lineWidth   = thickness;
+  ctx.strokeRect(thickness/2, thickness/2, canvas.width-thickness, canvas.height-thickness);
+
+  // Label which player is blocked
+  ctx.font = 'bold 13px monospace';
+  ctx.fillStyle = `rgba(255,100,50,${0.8+0.2*pulse})`;
+  ctx.shadowBlur = 8;
+  ctx.textAlign = 'center';
+  blocked.forEach((b, i) => {
+    const rem = Math.max(0, b.s.powerups.wallBlocked - ts);
+    ctx.fillText(`⛔ ${b.label}  ${(rem/1000).toFixed(1)}s`, canvas.width/2, canvas.height - 18 - i*20);
+  });
+  ctx.restore();
+}
+
+// Flashlight beam
+function drawFlashlight(snake) {
+  if (!snake.powerups.flash || (snake.dx===0 && snake.dy===0)) return;
+  let cx = snake.body[0].x + snake.dx, cy = snake.body[0].y + snake.dy;
+  const cells = [];
+  while (cx>=0 && cx<COLS && cy>=0 && cy<ROWS) { cells.push({x:cx,y:cy}); cx+=snake.dx; cy+=snake.dy; }
+  const obstacles = new Set();
+  for (const s of [p1,p2]) s.body.slice(1).forEach(b=>obstacles.add(`${b.x},${b.y}`));
+  cells.forEach((c,i) => {
+    const blocked = obstacles.has(`${c.x},${c.y}`);
+    const fade = 1 - i/cells.length;
+    ctx.globalAlpha = blocked ? 0.5*fade : 0.13*fade;
+    ctx.fillStyle   = blocked ? '#ff3300' : snake.color;
+    ctx.shadowColor = blocked ? '#ff3300' : 'transparent';
+    ctx.shadowBlur  = blocked ? 10 : 0;
+    ctx.fillRect(c.x*GRID, c.y*GRID, GRID, GRID);
+    ctx.globalAlpha = blocked ? 0.7*fade : 0.25*fade;
+    ctx.fillStyle   = blocked ? '#ff6644' : snake.color;
+    ctx.beginPath(); ctx.arc(c.x*GRID+GRID/2, c.y*GRID+GRID/2, 2, 0, Math.PI*2); ctx.fill();
+  });
+  ctx.globalAlpha=1; ctx.shadowBlur=0;
+}
+
+// Wavy tentacles
+function drawTentacles(snake, ts) {
+  if (!snake.powerups.tentacles) return;
+  ctx.lineCap = 'round'; ctx.lineWidth = 2.5;
+  for (let i=0; i<snake.body.length; i+=2) {
+    const seg = snake.body[i];
+    const {sdx, sdy} = segDir(snake, i);
+    const px = -sdy, py = sdx;
+    const wave = Math.sin(ts/160 + i*0.9);
+    const len  = (2.2 + wave*0.5) * GRID;
+    const wx   = sdx * wave * GRID * 0.6;
+    const wy   = sdy * wave * GRID * 0.6;
+    const sx   = seg.x*GRID+GRID/2, sy = seg.y*GRID+GRID/2;
+
+    for (const side of [1,-1]) {
+      const ex = sx + px*side*len, ey = sy + py*side*len;
+      const cpx = sx + px*side*len*0.5 + wx;
+      const cpy = sy + py*side*len*0.5 + wy;
+
+      const grad = ctx.createLinearGradient(sx, sy, ex, ey);
+      grad.addColorStop(0, snake.color + 'cc');
+      grad.addColorStop(1, snake.color + '11');
+
+      ctx.strokeStyle = grad;
+      ctx.shadowColor = snake.color; ctx.shadowBlur = 6;
+      ctx.globalAlpha = 0.85;
+      ctx.beginPath(); ctx.moveTo(sx,sy); ctx.quadraticCurveTo(cpx,cpy,ex,ey); ctx.stroke();
+
+      // Tip dot
+      ctx.globalAlpha = 0.9;
+      ctx.fillStyle = snake.color;
+      ctx.shadowBlur = 10;
+      ctx.beginPath(); ctx.arc(ex, ey, 3, 0, Math.PI*2); ctx.fill();
+    }
+  }
+  ctx.globalAlpha=1; ctx.shadowBlur=0;
+}
+
+function drawSnake(snake, ts) {
+  const hasDagger    = snake.powerups.dagger    > 0;
+  const hasSpeed     = snake.powerups.speed     > 0;
+  const hasFlash     = snake.powerups.flash     > 0;
+  const hasFat       = snake.powerups.fat       > 0;
+  const hasTentacles = snake.powerups.tentacles > 0;
+  const pulse = 0.6 + 0.4*Math.sin(ts/180);
+
+  snake.body.forEach((seg, i) => {
+    const isHead = i === 0;
+    ctx.globalAlpha = isHead ? 1 : Math.max(0.25, 1 - i/snake.body.length*0.75);
+    ctx.fillStyle = snake.color;
+
+    if (isHead) {
+      if      (hasDagger)    { ctx.shadowColor='#ff2244'; ctx.shadowBlur=22*pulse; }
+      else if (hasSpeed)     { ctx.shadowColor='#00ffff'; ctx.shadowBlur=22*pulse; }
+      else if (hasFlash)     { ctx.shadowColor='#ffee44'; ctx.shadowBlur=22*pulse; }
+      else if (hasFat)       { ctx.shadowColor='#ff44ff'; ctx.shadowBlur=22*pulse; }
+      else if (hasTentacles) { ctx.shadowColor='#88ff00'; ctx.shadowBlur=22*pulse; }
+      else                   { ctx.shadowColor=snake.shadowColor; ctx.shadowBlur=18; }
+    } else { ctx.shadowBlur=0; }
+
+    // Fat = draw segments larger (no padding, slightly beyond cell)
+    const pad = hasFat ? -3 : (isHead ? 1 : 2);
+    ctx.beginPath();
+    ctx.roundRect(seg.x*GRID+pad, seg.y*GRID+pad, GRID-pad*2, GRID-pad*2, isHead ? 5 : 3);
+    ctx.fill();
+
+    // Head icon for active power-up
+    if (isHead) {
+      const icon = hasDagger ? '🗡️' : hasSpeed ? '⚡' : hasFlash ? '🔦' : hasFat ? '🐡' : hasTentacles ? '🐙' : null;
+      if (icon) {
+        ctx.shadowBlur=0; ctx.globalAlpha=1;
+        ctx.font=`${GRID-8}px serif`; ctx.textAlign='center'; ctx.textBaseline='middle';
+        ctx.fillText(icon, seg.x*GRID+GRID/2, seg.y*GRID+GRID/2);
+        ctx.textBaseline='alphabetic';
+      }
+    }
+  });
+  ctx.globalAlpha=1; ctx.shadowBlur=0;
+}
+
+function drawRegularFoods() {
+  foods.forEach(f => {
+    ctx.shadowColor=f.color; ctx.shadowBlur=14; ctx.fillStyle=f.color;
+    ctx.beginPath(); ctx.arc(f.x*GRID+GRID/2, f.y*GRID+GRID/2, GRID/2-3, 0, Math.PI*2); ctx.fill();
+  });
+  ctx.shadowBlur=0;
+}
+
+const SPECIAL_GLOW = {
+  speed:'#00ffff', dagger:'#ff2244', flash:'#ffee44',
+  wall:'#ff8800', fat:'#ff44ff', tentacles:'#88ff00'
+};
+const SPECIAL_ICON = {
+  speed:'⚡', dagger:'🗡️', flash:'🔦', wall:'🧱', fat:'🐡', tentacles:'🐙'
+};
+
+function drawSpecialFoods(ts) {
+  specialFoods.forEach(sf => {
+    const cx=sf.x*GRID+GRID/2, cy=sf.y*GRID+GRID/2;
+    const pulse = 0.65 + 0.35*Math.sin(ts/250);
+    const glow  = SPECIAL_GLOW[sf.type];
+    ctx.globalAlpha = 0.28*pulse;
+    ctx.fillStyle=glow; ctx.shadowColor=glow; ctx.shadowBlur=24*pulse;
+    ctx.beginPath(); ctx.arc(cx, cy, GRID/2+4, 0, Math.PI*2); ctx.fill();
+    ctx.globalAlpha=1; ctx.shadowBlur=0;
+    ctx.font=`${GRID+2}px serif`; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText(SPECIAL_ICON[sf.type], cx, cy+1);
+    ctx.textBaseline='alphabetic';
+  });
+}
+
+function drawInputLog(log, panelX) {
+  if (!log.length) return;
+  const PAD=10, ROW=21, HEADER=28, W=155;
+  ctx.globalAlpha=0.6; ctx.fillStyle='#080812';
+  ctx.beginPath(); ctx.roundRect(panelX,10,W,HEADER+log.length*ROW+8,8); ctx.fill();
+  ctx.globalAlpha=1;
+  ctx.font='bold 10px monospace'; ctx.fillStyle='rgba(255,255,255,0.3)'; ctx.textAlign='left';
+  ctx.fillText('KEY   RESPONSE TIME', panelX+PAD, 28);
+  log.forEach((e,i) => {
+    const ey=10+HEADER+i*ROW, ms=e.ms;
+    const col = ms===null?'#666':ms<60?'#00ff88':ms<115?'#ffcc00':'#ff4466';
+    ctx.font='13px monospace'; ctx.fillStyle='rgba(255,255,255,0.55)'; ctx.textAlign='left';
+    ctx.fillText(e.key, panelX+PAD, ey);
+    ctx.font='bold 13px monospace'; ctx.fillStyle=col; ctx.textAlign='right';
+    ctx.fillText(ms!==null?`${ms} ms`:'…', panelX+W-PAD, ey);
+  });
+  ctx.textAlign='left';
+}
+
+const HUD_COL = {
+  speed:'#00ffff', dagger:'#ff2244', flash:'#ffee44',
+  fat:'#ff44ff', tentacles:'#88ff00', wallBlocked:'#ff5500'
+};
+const HUD_ICON = {
+  speed:'⚡', dagger:'🗡️', flash:'🔦', fat:'🐡', tentacles:'🐙', wallBlocked:'⛔'
+};
+const HUD_LABEL = {
+  speed:'SPEED', dagger:'DAGGER', flash:'FLASHLIGHT',
+  fat:'FAT BODY', tentacles:'TENTACLES', wallBlocked:'WALL BLOCKED'
+};
+
+function drawPowerupHUD(snake, ts, panelX) {
+  const pus = [];
+  for (const key of ['speed','dagger','flash','fat','tentacles','wallBlocked']) {
+    if (snake.powerups[key] > 0) pus.push({type:key, expiry: snake.powerups[key]});
+  }
+  if (!pus.length) return;
+
+  const W=175, BAR_H=26, GAP=5;
+  const totalH = pus.length*(BAR_H+GAP)-GAP+10;
+  const panelY = canvas.height - totalH - 14;
+  ctx.globalAlpha=0.65; ctx.fillStyle='#080812';
+  ctx.beginPath(); ctx.roundRect(panelX, panelY-4, W, totalH+8, 8); ctx.fill();
+  ctx.globalAlpha=1;
+
+  pus.forEach((pu, i) => {
+    const isPerm    = pu.expiry === Infinity;
+    const remaining = isPerm ? Infinity : Math.max(0, pu.expiry - ts);
+    const pct       = isPerm ? 1 : Math.min(1, remaining / POWERUP_DURATION);
+    const col = HUD_COL[pu.type];
+    const by  = panelY + i*(BAR_H+GAP);
+
+    ctx.globalAlpha=0.18; ctx.fillStyle=col;
+    ctx.beginPath(); ctx.roundRect(panelX+4, by, W-8, BAR_H, 5); ctx.fill();
+    ctx.globalAlpha=0.55;
+    ctx.beginPath(); ctx.roundRect(panelX+4, by, (W-8)*pct, BAR_H, 5); ctx.fill();
+    ctx.globalAlpha=1;
+
+    ctx.font='bold 11px monospace'; ctx.fillStyle=col;
+    ctx.textAlign='left';
+    ctx.fillText(`${HUD_ICON[pu.type]} ${HUD_LABEL[pu.type]}`, panelX+9, by+17);
+    ctx.textAlign='right';
+    ctx.fillText(isPerm ? '∞' : `${(remaining/1000).toFixed(1)}s`, panelX+W-7, by+17);
+    ctx.textAlign='left';
+  });
+}
+
+// P-key test mode badge
+function drawTestMode() {
+  if (p2TestIdx < 0) return;
+  const type = TEST_CYCLE[p2TestIdx];
+  const icon  = SPECIAL_ICON[type]  || '✖';
+  const label = type === 'none' ? 'OFF' : (HUD_LABEL[type] || type.toUpperCase());
+  const col   = SPECIAL_GLOW[type]  || '#888';
+
+  const W = 230, H = 30, X = (canvas.width - W) / 2, Y = 8;
+  ctx.globalAlpha = 0.75;
+  ctx.fillStyle = '#080812';
+  ctx.beginPath(); ctx.roundRect(X, Y, W, H, 8); ctx.fill();
+  ctx.globalAlpha = 1;
+
+  // Pulsing border
+  ctx.strokeStyle = col; ctx.lineWidth = 1.5;
+  ctx.globalAlpha = 0.6;
+  ctx.beginPath(); ctx.roundRect(X, Y, W, H, 8); ctx.stroke();
+  ctx.globalAlpha = 1;
+
+  ctx.font = 'bold 13px monospace';
+  ctx.fillStyle = col;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(`🎮 TEST  P2 → ${icon} ${label}  [P to rotate]`, canvas.width/2, Y + H/2);
+  ctx.textBaseline = 'alphabetic';
+}
+
+// Score progress bar under topbar
+function drawScoreBar(ts) {
+  const BAR_W = 220, H = 4, Y = 0;
+  // P1 left
+  ctx.globalAlpha=0.25; ctx.fillStyle='#00ff88';
+  ctx.fillRect(0, Y, BAR_W, H);
+  ctx.globalAlpha=0.8;
+  ctx.fillRect(0, Y, BAR_W * Math.min(1, p1.score/WIN_SCORE), H);
+  // P2 right
+  ctx.globalAlpha=0.25; ctx.fillStyle='#00aaff';
+  ctx.fillRect(canvas.width-BAR_W, Y, BAR_W, H);
+  ctx.globalAlpha=0.8;
+  ctx.fillRect(canvas.width-BAR_W*(Math.min(1, p2.score/WIN_SCORE)), Y, BAR_W*(Math.min(1, p2.score/WIN_SCORE)), H);
+  ctx.globalAlpha=1;
+}
+
+function draw(ts) {
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.fillStyle='#0d0d1a'; ctx.fillRect(0,0,canvas.width,canvas.height);
+  drawGrid();
+  if (!p1 || !p2) return;
+  drawWallBorder(ts);
+  drawRegularFoods();
+  drawSpecialFoods(ts);
+  drawFlashlight(p1); drawFlashlight(p2);
+  drawTentacles(p1,ts); drawTentacles(p2,ts);
+  drawSnake(p1,ts); drawSnake(p2,ts);
+  drawScoreBar(ts);
+  drawTestMode();
+  drawInputLog(inputLog.p1, 10);
+  drawInputLog(inputLog.p2, canvas.width-165);
+  drawPowerupHUD(p1, ts, 10);
+  drawPowerupHUD(p2, ts, canvas.width-187);
+}
+
+// ─── Game loop ───────────────────────────────────────────────────────────────
+function loop(ts) {
+  if (!gameRunning) return;
+
+  if (p1.alive && ts - p1.lastMove >= p1.moveInterval) {
+    moveSnake(p1,'p1'); checkFood(p1,ts); p1.lastMove=ts;
+  }
+  if (p2.alive && ts - p2.lastMove >= p2.moveInterval) {
+    moveSnake(p2,'p2'); checkFood(p2,ts); p2.lastMove=ts;
+  }
+
+  checkCollisions();
+  checkTentacleCollisions(p1, p2, ts);
+  checkTentacleCollisions(p2, p1, ts);
+  checkPowerupExpiry(ts);
+
+  if (ts - lastSpecialSpawn >= SPECIAL_INTERVAL) spawnSpecial(ts);
+  // Keep regular food topped up
+  while (foods.length < FOOD_TARGET) spawnFood();
+
+  s1El.textContent = p1.score;
+  s2El.textContent = p2.score;
+
+  if (p1.score >= WIN_SCORE || p2.score >= WIN_SCORE) { p1.alive=false; p2.alive=false; }
+
+  draw(ts);
+  if (!p1.alive || !p2.alive) { endRound(); return; }
+  animFrame = requestAnimationFrame(loop);
+}
+
+function endRound() {
+  draw(performance.now()); gameRunning = false;
+  let title, msg;
+  if      (p1.score >= WIN_SCORE) { title='Player 1 Wins!'; msg=`Final: ${p1.score} — ${p2.score}`; overlayTitle.style.color='#00ff88'; }
+  else if (p2.score >= WIN_SCORE) { title='Player 2 Wins!'; msg=`Final: ${p2.score} — ${p1.score}`; overlayTitle.style.color='#00aaff'; }
+  else if (!p1.alive && !p2.alive){ title='Draw!';           msg='Both crashed simultaneously';       overlayTitle.style.color='#ffcc00'; }
+  else if (!p1.alive)             { title='Player 2 Wins!'; msg='Player 1 crashed!';                 overlayTitle.style.color='#00aaff'; }
+  else                            { title='Player 1 Wins!'; msg='Player 2 crashed!';                 overlayTitle.style.color='#00ff88'; }
+  overlayTitle.textContent=title; overlayMsg.textContent=msg;
+  startBtn.textContent='PLAY AGAIN'; overlay.style.display='flex';
+}
+
+startBtn.addEventListener('click', () => {
+  overlay.style.display='none'; overlayTitle.style.color='';
+  const now = performance.now();
+  initGame(now);
+  s1El.textContent='0'; s2El.textContent='0';
+  gameRunning=true;
+  animFrame = requestAnimationFrame(loop);
+});
+</script>
+</body>
+</html>

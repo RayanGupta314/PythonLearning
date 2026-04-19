@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Timezone Globe</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600&family=DM+Mono:wght@300;400&display=swap" rel="stylesheet">
+<style>
+  :root{--bg:#030c18;--accent:#64ffda;--gold:#ffd700;--orange:#ff8c42;--text:rgba(200,225,255,0.88);--dim:rgba(130,170,210,0.45);--panel-bg:rgba(3,14,30,0.96);}
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{background:var(--bg);min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:'DM Mono',monospace;color:var(--text);overflow:hidden;}
+  #stars{position:fixed;inset:0;z-index:0;pointer-events:none;}
+  .wrapper{position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;gap:10px;}
+  header{text-align:center;}
+  header h1{font-family:'Cinzel',serif;font-weight:400;font-size:clamp(15px,2vw,22px);letter-spacing:8px;text-transform:uppercase;text-shadow:0 0 30px rgba(100,255,218,0.25);}
+  header p{font-size:9px;letter-spacing:3px;color:var(--dim);text-transform:uppercase;margin-top:4px;}
+  .controls{display:flex;align-items:center;gap:14px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:30px;padding:7px 16px;}
+  .ctrl-label{font-size:8px;letter-spacing:2px;text-transform:uppercase;color:var(--dim);margin-bottom:3px;}
+  .seg{display:flex;background:rgba(0,0,0,0.3);border-radius:20px;padding:2px;gap:2px;}
+  .seg-btn{font-family:'DM Mono',monospace;font-size:9px;letter-spacing:1px;text-transform:uppercase;background:transparent;border:none;color:var(--dim);cursor:pointer;padding:5px 11px;border-radius:16px;transition:all .2s;}
+  .seg-btn.active{background:rgba(100,255,218,0.15);color:var(--accent);}
+  .ctrl-sep{width:1px;height:30px;background:rgba(255,255,255,0.08);}
+  .date-toggle{font-family:'DM Mono',monospace;font-size:9px;letter-spacing:2px;text-transform:uppercase;cursor:pointer;border:1px solid rgba(255,255,255,0.12);background:transparent;color:var(--dim);border-radius:20px;padding:5px 12px;transition:all .2s;}
+  .date-toggle.active{border-color:var(--gold);color:var(--gold);background:rgba(255,215,0,0.08);}
+  .globe-row{display:flex;align-items:center;gap:14px;}
+  #globe{cursor:grab;display:block;filter:drop-shadow(0 0 40px rgba(10,60,140,0.55));}
+  #globe:active{cursor:grabbing;}
+  .tz-panel{width:185px;background:var(--panel-bg);border:1px solid rgba(100,255,218,0.18);border-radius:14px;padding:16px 15px;opacity:0;transform:translateX(10px);transition:opacity .25s,transform .25s;pointer-events:none;box-shadow:0 8px 40px rgba(0,0,0,0.6);}
+  .tz-panel.open{opacity:1;transform:translateX(0);pointer-events:all;}
+  .panel-close{float:right;background:none;border:none;color:var(--dim);cursor:pointer;font-size:12px;transition:color .15s;}
+  .panel-close:hover{color:var(--text);}
+  .panel-tzname{font-family:'Cinzel',serif;font-size:10px;font-weight:600;color:var(--accent);letter-spacing:0.5px;word-break:break-all;margin-top:4px;min-height:28px;}
+  .panel-offset{font-size:21px;font-weight:300;letter-spacing:2px;margin-top:6px;}
+  .panel-sep{height:1px;background:rgba(255,255,255,0.07);margin:10px 0;}
+  .panel-row{margin-bottom:9px;}
+  .panel-sublabel{font-size:8px;letter-spacing:3px;color:var(--dim);text-transform:uppercase;margin-bottom:2px;}
+  .panel-time{font-size:19px;font-weight:300;font-variant-numeric:tabular-nums;letter-spacing:2px;}
+  .panel-date{font-size:11px;color:rgba(200,225,255,0.65);letter-spacing:0.5px;}
+  .panel-places{font-size:9px;color:var(--dim);line-height:1.5;margin-top:2px;}
+  .panel-daystatus{font-size:9px;letter-spacing:2px;font-weight:400;display:inline-block;padding:3px 9px;border-radius:10px;text-transform:uppercase;}
+  .ds-today{background:rgba(100,255,218,0.12);color:var(--accent);}
+  .ds-tomorrow{background:rgba(255,190,60,0.15);color:#ffbb30;}
+  .ds-yesterday{background:rgba(180,100,255,0.15);color:#cc88ff;}
+  .date-legend{display:flex;align-items:center;gap:8px;opacity:0;pointer-events:none;transition:opacity .3s;}
+  .date-legend.show{opacity:1;}
+  .dl-item{display:flex;align-items:center;gap:5px;font-size:9px;letter-spacing:1px;color:var(--dim);text-transform:uppercase;}
+  .dl-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;}
+  .dl-dot.yesterday{background:rgba(180,100,255,0.8);}
+  .dl-dot.today{background:rgba(100,255,218,0.8);}
+  .dl-dot.tomorrow{background:rgba(255,190,60,0.8);}
+  .dl-date{font-size:9px;color:var(--text);margin-top:1px;}
+  .dl-arr{color:var(--dim);font-size:10px;}
+  .clock-row{display:flex;align-items:center;gap:18px;}
+  .ck-block{text-align:center;}
+  .ck-label{font-size:8px;letter-spacing:3px;color:var(--dim);text-transform:uppercase;margin-bottom:3px;}
+  #utc-clock{font-size:clamp(20px,3vw,32px);font-weight:300;letter-spacing:4px;color:var(--accent);font-variant-numeric:tabular-nums;text-shadow:0 0 20px rgba(100,255,218,0.5);}
+  #utc-date{font-size:clamp(11px,1.4vw,15px);font-weight:300;letter-spacing:2px;color:rgba(160,200,240,0.6);font-variant-numeric:tabular-nums;}
+  .ck-sep{width:1px;height:34px;background:linear-gradient(to bottom,transparent,rgba(100,255,218,0.2),transparent);}
+  .hint{font-size:8px;letter-spacing:2px;color:rgba(100,150,200,0.3);text-transform:uppercase;}
+  .legend{display:flex;gap:16px;align-items:center;flex-wrap:wrap;justify-content:center;}
+  .leg-item{display:flex;align-items:center;gap:5px;font-size:8px;letter-spacing:1px;color:var(--dim);text-transform:uppercase;}
+  #tooltip{position:fixed;z-index:200;background:rgba(3,12,26,0.93);backdrop-filter:blur(16px);border:1px solid rgba(100,255,218,0.2);border-radius:10px;padding:9px 14px;pointer-events:none;opacity:0;transition:opacity .12s;min-width:130px;}
+  .tt-name{font-family:'Cinzel',serif;font-size:13px;color:var(--accent);font-weight:600;}
+  .tt-sub{font-size:10px;color:var(--dim);margin-top:2px;}
+  #loading{position:fixed;inset:0;z-index:300;background:rgba(3,12,26,0.88);backdrop-filter:blur(8px);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;opacity:0;pointer-events:none;transition:opacity .2s;}
+  #loading.show{opacity:1;pointer-events:all;}
+  .spinner{width:30px;height:30px;border:2px solid rgba(100,255,218,0.2);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+  .load-txt{font-size:10px;letter-spacing:3px;color:var(--dim);text-transform:uppercase;}
+  .load-err{font-size:10px;color:#ff7070;letter-spacing:1px;text-align:center;max-width:260px;line-height:1.6;display:none;}
+</style>
+</head>
+<body>
+<canvas id="stars"></canvas>
+<div class="wrapper">
+  <header>
+    <h1>Timezone Atlas</h1>
+    <p>Earth · UTC Reference · Political Boundaries</p>
+  </header>
+  <div class="controls">
+    <div>
+      <div class="ctrl-label">Zone Lines</div>
+      <div class="seg">
+        <button class="seg-btn active" id="btn-std">Standard</button>
+        <button class="seg-btn" id="btn-pol">Political</button>
+      </div>
+    </div>
+    <div class="ctrl-sep"></div>
+    <div>
+      <div class="ctrl-label">Date View</div>
+      <button class="date-toggle" id="date-btn">Show Dates</button>
+    </div>
+  </div>
+  <div class="globe-row">
+    <canvas id="globe"></canvas>
+    <div class="tz-panel" id="tz-panel">
+      <button class="panel-close" id="panel-close">✕</button>
+      <div class="panel-tzname" id="p-name">—</div>
+      <div class="panel-offset" id="p-offset">UTC +0</div>
+      <div class="panel-sep"></div>
+      <div class="panel-row">
+        <div class="panel-sublabel">Local Time</div>
+        <div class="panel-time" id="p-time">—</div>
+      </div>
+      <div class="panel-row">
+        <div class="panel-sublabel">Date</div>
+        <div class="panel-date" id="p-date">—</div>
+        <div class="panel-daystatus ds-today" id="p-status" style="margin-top:5px;">Today</div>
+      </div>
+      <div class="panel-row">
+        <div class="panel-sublabel">Places</div>
+        <div class="panel-places" id="p-places">—</div>
+      </div>
+    </div>
+  </div>
+  <div class="date-legend" id="date-legend">
+    <div class="dl-item"><div class="dl-dot yesterday"></div><div><div>Yesterday</div><div class="dl-date" id="dl-yd">—</div></div></div>
+    <div class="dl-arr">→</div>
+    <div class="dl-item"><div class="dl-dot today"></div><div><div>Today</div><div class="dl-date" id="dl-td">—</div></div></div>
+    <div class="dl-arr">→</div>
+    <div class="dl-item"><div class="dl-dot tomorrow"></div><div><div>Tomorrow</div><div class="dl-date" id="dl-tm">—</div></div></div>
+  </div>
+  <div class="clock-row">
+    <div class="ck-block"><div class="ck-label">Coordinated Universal Time</div><div id="utc-clock">00:00:00</div></div>
+    <div class="ck-sep"></div>
+    <div class="ck-block"><div class="ck-label">UTC Date</div><div id="utc-date">—</div></div>
+  </div>
+  <div class="legend">
+    <div class="leg-item"><span style="display:inline-block;width:18px;border-top:2px solid #ffd700;"></span>Prime Meridian</div>
+    <div class="leg-item"><span style="display:inline-block;width:18px;border-top:2px solid #ff8c42;"></span>Int'l Date Line</div>
+    <div class="leg-item" id="pol-leg" style="display:none"><span style="display:inline-block;width:18px;border-top:2px solid rgba(255,255,255,0.7);"></span>Real TZ Lines</div>
+  </div>
+  <div class="hint">Drag · Scroll to zoom · Click timezone for details</div>
+</div>
+<div id="tooltip"><div class="tt-name" id="tt-name"></div><div class="tt-sub" id="tt-sub"></div></div>
+<div id="loading">
+  <div class="spinner"></div>
+  <div class="load-txt">Loading political boundaries…</div>
+  <div class="load-err" id="load-err"></div>
+</div>
+
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script src="https://unpkg.com/topojson@3/dist/topojson.min.js"></script>
+<script>
+const TAU = Math.PI * 2;
+const MO  = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+// ── Stars (static canvas, drawn once) ────────────────────
+(function(){
+  const c=document.getElementById('stars'),x=c.getContext('2d');
+  function draw(){c.width=innerWidth;c.height=innerHeight;for(let i=0;i<Math.floor(innerWidth*innerHeight/4800);i++){const h=Math.random()*50+200,a=Math.random()*0.5+0.08;x.beginPath();x.arc(Math.random()*c.width,Math.random()*c.height,Math.random()*1.3,0,TAU);x.fillStyle=`hsla(${h},55%,92%,${a})`;x.fill();}}
+  draw(); addEventListener('resize',draw);
+})();
+
+// ── Canvas + projection setup ─────────────────────────────
+const SZ  = Math.min(innerWidth * 0.80, innerHeight * 0.50, 520);
+const BR  = SZ * 0.46;
+const DPR = Math.min(window.devicePixelRatio || 1, 2); // HiDPI, cap at 2x
+
+const canvas = document.getElementById('globe');
+canvas.width  = SZ * DPR;
+canvas.height = SZ * DPR;
+canvas.style.width  = SZ + 'px';
+canvas.style.height = SZ + 'px';
+const ctx = canvas.getContext('2d');
+ctx.scale(DPR, DPR); // scale once; all coords are in CSS-pixel space
+
+const proj = d3.geoOrthographic()
+  .scale(BR).translate([SZ/2, SZ/2]).clipAngle(90).rotate([18, -22]);
+
+// pg(feature) → calls ctx.beginPath() internally, then draws via moveTo/lineTo
+const pg = d3.geoPath().projection(proj).context(ctx);
+
+// ── Pre-built geographic features (created once) ──────────
+function makeMeridian(lon){
+  return {type:'Feature',geometry:{type:'LineString',
+    coordinates:Array.from({length:181},(_,k)=>[lon,-90+k])}};
+}
+function makePoly(l1,l2){
+  const pts=[],s=40;
+  for(let i=0;i<=s;i++) pts.push([l1,-90+i*180/s]);
+  for(let i=0;i<=s;i++) pts.push([l2,90-i*180/s]);
+  pts.push([l1,-90]);
+  return {type:'Feature',geometry:{type:'Polygon',coordinates:[pts]}};
+}
+
+const primeFeat  = makeMeridian(0);
+const idlFeat    = makeMeridian(-180);
+const equatorFeat= {type:'Feature',geometry:{type:'LineString',coordinates:Array.from({length:361},(_,k)=>[-180+k,0])}};
+const stdBandFeat= Array.from({length:24},(_,i)=>makePoly(-180+i*15,-165+i*15));
+const stdMeridians = [];
+for(let lon=-165;lon<=165;lon+=15){ if(lon===0) continue; stdMeridians.push(makeMeridian(lon)); }
+
+const labelData = Array.from({length:25},(_,i)=>{
+  const o=-12+i; return {lon:o*15,off:o,label:o===0?'UTC':o>0?`+${o}`:`${o}`,isGmt:o===0};
+});
+
+// ── State ─────────────────────────────────────────────────
+const S = {
+  mode:'standard', dateView:false, selected:null,
+  spinning:true, polData:null, polLoaded:false, polLoading:false,
+  dragging:false, dragOrigin:null, rotateOrigin:null, resumeId:null
+};
+
+// ── Date helpers ──────────────────────────────────────────
+function getDateCat(off){
+  const n=new Date(),H=n.getUTCHours()+n.getUTCMinutes()/60+n.getUTCSeconds()/3600;
+  const t=H+off; return t>=24?'tomorrow':t<0?'yesterday':'today';
+}
+const DATE_CLR={yesterday:'rgba(180,100,255,0.55)',today:'rgba(50,210,240,0.30)',tomorrow:'rgba(255,190,60,0.55)'};
+
+function zoneColor(off,a=0.72){
+  const hue=220-((off+12)/26)*180; // blue(-12) → teal(0) → gold(+14)
+  return `hsla(${hue},70%,52%,${a})`;
+}
+function getFill(zone){
+  return S.dateView ? DATE_CLR[getDateCat(zone)] : zoneColor(zone);
+}
+function getMidnightLon(){
+  const n=new Date(),H=n.getUTCHours()+n.getUTCMinutes()/60+n.getUTCSeconds()/3600;
+  let lon=(24-H)*15; if(lon>180) lon-=360; return lon;
+}
+function onFront(lon,lat){
+  const[λ,φ]=proj.rotate(),r=Math.PI/180;
+  return(Math.cos(lat*r)*Math.cos(lon*r)*Math.cos(-φ*r)*Math.cos(-λ*r)+
+         Math.cos(lat*r)*Math.sin(lon*r)*Math.cos(-φ*r)*Math.sin(-λ*r)+
+         Math.sin(lat*r)*Math.sin(-φ*r))>0.03;
+}
+
+// ── Cached world borders ──────────────────────────────────
+let worldBorders = null;
+fetch('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json')
+  .then(r=>r.json()).then(w=>{
+    worldBorders = topojson.mesh(w, w.objects.countries, (a,b)=>a!==b);
+  });
+
+// ── Render (Canvas — no DOM, no path strings) ─────────────
+function render(){
+  const cx=SZ/2, cy=SZ/2, r=proj.scale();
+
+  ctx.clearRect(0, 0, SZ, SZ);
+
+  // 1. Atmosphere halo
+  const aGrad=ctx.createRadialGradient(cx,cy,r,cx,cy,r+26);
+  aGrad.addColorStop(0,'rgba(80,160,255,0.28)');
+  aGrad.addColorStop(1,'rgba(30,80,200,0)');
+  ctx.beginPath(); ctx.arc(cx,cy,r+26,0,TAU); ctx.fillStyle=aGrad; ctx.fill();
+
+  // 2. Ocean
+  const oGrad=ctx.createRadialGradient(cx*0.68,cy*0.56,0,cx,cy,r*1.1);
+  oGrad.addColorStop(0,'#1a5590'); oGrad.addColorStop(0.55,'#0e3460'); oGrad.addColorStop(1,'#061525');
+  ctx.beginPath(); ctx.arc(cx,cy,r,0,TAU); ctx.fillStyle=oGrad; ctx.fill();
+
+  // Clip all geo drawing to globe circle
+  ctx.save();
+  ctx.beginPath(); ctx.arc(cx,cy,r,0,TAU); ctx.clip();
+
+  // 3. Zone fills
+  if(S.mode==='standard'){
+    stdBandFeat.forEach((f,i)=>{
+      pg(f);
+      ctx.fillStyle=S.dateView?DATE_CLR[getDateCat(-12+i)]:`hsla(${i*15},55%,65%,${i%2===0?0.11:0.05})`;
+      ctx.fill();
+    });
+  } else if(S.polData){
+    // Visibility cull: skip features entirely on the back hemisphere
+    // Combined fill+stroke in ONE pass → halves projection work vs two passes
+    ctx.lineWidth=1; ctx.lineJoin='round';
+    ctx.strokeStyle='rgba(255,255,255,0.7)';
+    S.polData.forEach(f=>{
+      if(f._bbox){
+        const [[x0,y0],[x1,y1]]=f._bbox, mx=(x0+x1)/2, my=(y0+y1)/2;
+        if(!onFront(mx,my)&&!onFront(x0,y0)&&!onFront(x1,y1)&&!onFront(x0,y1)&&!onFront(x1,y0)) return;
+      }
+      pg(f);
+      ctx.fillStyle=getFill(f.properties.zone);
+      ctx.fill();
+      ctx.stroke();
+    });
+  }
+
+  // 4. Country borders
+  if(worldBorders){
+    pg(worldBorders);
+    ctx.strokeStyle='rgba(255,255,255,0.13)'; ctx.lineWidth=0.5; ctx.stroke();
+  }
+
+  // 5a. Standard meridian lines (dashed)
+  if(S.mode==='standard'){
+    ctx.strokeStyle='rgba(150,205,255,0.48)'; ctx.lineWidth=0.75; ctx.setLineDash([6,4]);
+    stdMeridians.forEach(f=>{ pg(f); ctx.stroke(); });
+    ctx.setLineDash([]);
+  }
+
+  // 6. Prime meridian + IDL (always on top)
+  pg(primeFeat); ctx.strokeStyle='#ffd700'; ctx.lineWidth=2; ctx.setLineDash([]); ctx.stroke();
+  pg(idlFeat);   ctx.strokeStyle='#ff8c42'; ctx.lineWidth=1.8; ctx.stroke();
+
+  // 7. Equator
+  pg(equatorFeat);
+  ctx.strokeStyle='rgba(100,255,218,0.18)'; ctx.lineWidth=0.8; ctx.setLineDash([3,5]); ctx.stroke(); ctx.setLineDash([]);
+
+  // 8. Midnight line (date view)
+  if(S.dateView){
+    const mlon=getMidnightLon();
+    pg(makeMeridian(mlon));
+    ctx.strokeStyle='rgba(255,255,255,0.6)'; ctx.lineWidth=2; ctx.setLineDash([8,4]); ctx.stroke(); ctx.setLineDash([]);
+    const pt=proj([mlon,20]);
+    if(pt){ ctx.font='8px DM Mono,monospace'; ctx.fillStyle='rgba(255,255,255,0.55)'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText('midnight',pt[0],pt[1]); }
+  }
+
+  // 9. UTC labels (standard mode)
+  if(S.mode==='standard'){
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    labelData.forEach(d=>{
+      if(!onFront(d.lon,6)) return;
+      const pt=proj([d.lon,6]); if(!pt) return;
+      ctx.font=`${d.isGmt?9:8}px DM Mono,monospace`;
+      ctx.fillStyle=d.isGmt?'#ffd700':'rgba(160,210,255,0.72)';
+      ctx.fillText(d.label,pt[0],pt[1]);
+    });
+  }
+
+  ctx.restore(); // end clip
+
+  // 10. Specular highlight
+  const hGrad=ctx.createRadialGradient(cx*0.54,cy*0.44,0,cx,cy,r);
+  hGrad.addColorStop(0,'rgba(190,225,255,0.13)'); hGrad.addColorStop(1,'rgba(190,225,255,0)');
+  ctx.beginPath(); ctx.arc(cx,cy,r,0,TAU); ctx.fillStyle=hGrad; ctx.fill();
+
+  // 11. Night shadow
+  const nGrad=ctx.createRadialGradient(cx*1.48,cy*1.28,0,cx,cy,r);
+  nGrad.addColorStop(0,'rgba(0,3,12,0)'); nGrad.addColorStop(0.55,'rgba(0,3,12,0.18)'); nGrad.addColorStop(1,'rgba(0,3,12,0.72)');
+  ctx.beginPath(); ctx.arc(cx,cy,r,0,TAU); ctx.fillStyle=nGrad; ctx.fill();
+
+  // 12. Globe rim + atmosphere rim
+  ctx.beginPath(); ctx.arc(cx,cy,r,0,TAU); ctx.strokeStyle='rgba(70,130,230,0.35)'; ctx.lineWidth=1.5; ctx.stroke();
+  ctx.beginPath(); ctx.arc(cx,cy,r+3,0,TAU); ctx.strokeStyle='rgba(80,160,255,0.22)'; ctx.lineWidth=6; ctx.stroke();
+}
+
+// ── Perf stats ────────────────────────────────────────────
+const perf = { fps:0, renderMs:0, _frames:0, _fpsTs:0, _avgMs:0 };
+
+function drawStats(){
+  const x=8, y=14;
+  ctx.save();
+  ctx.font='bold 10px DM Mono,monospace';
+  ctx.textAlign='left'; ctx.textBaseline='top';
+  const tag=`FPS: ${perf.fps.toFixed(0)}  render: ${perf.renderMs.toFixed(1)}ms  polys: ${S.polData?S.polData.length:0}`;
+  ctx.fillStyle='rgba(0,0,0,0.55)';
+  const w=ctx.measureText(tag).width;
+  ctx.fillRect(x-3,y-3,w+6,16);
+  ctx.fillStyle= perf.fps<20?'#ff5555': perf.fps<28?'#ffcc44':'#44ffaa';
+  ctx.fillText(tag,x,y);
+  ctx.restore();
+}
+
+// ── Animation loop — 30fps cap, time-normalised spin ──────
+const FRAME_MS = 1000 / 30;
+let lastRenderTs = 0;
+
+function animate(ts){
+  requestAnimationFrame(animate);
+  const dt = ts - lastRenderTs;
+  if(dt < FRAME_MS - 2) return;
+  if(S.spinning){
+    const[λ,φ]=proj.rotate();
+    proj.rotate([λ + 0.07*(dt/16.67), φ]);
+  }
+  // FPS counter (rolling over 1s window)
+  perf._frames++;
+  if(ts - perf._fpsTs >= 1000){
+    perf.fps = perf._frames * 1000 / (ts - perf._fpsTs);
+    perf._frames = 0; perf._fpsTs = ts;
+  }
+  lastRenderTs = ts;
+  const t0 = performance.now();
+  render();
+  perf.renderMs = performance.now() - t0;
+  drawStats();
+}
+requestAnimationFrame(animate);
+
+// ── Drag ─────────────────────────────────────────────────
+canvas.addEventListener('mousedown', e=>{
+  S.dragging=true; S.spinning=false;
+  clearTimeout(S.resumeId);
+  S.dragOrigin=[e.clientX,e.clientY]; S.rotateOrigin=[...proj.rotate()];
+  canvas.style.cursor='grabbing';
+});
+window.addEventListener('mousemove', e=>{
+  if(!S.dragging) return;
+  const dx=e.clientX-S.dragOrigin[0], dy=e.clientY-S.dragOrigin[1];
+  proj.rotate([S.rotateOrigin[0]+dx*0.33, Math.max(-85,Math.min(85,S.rotateOrigin[1]-dy*0.33))]);
+});
+window.addEventListener('mouseup', ()=>{
+  if(!S.dragging) return;
+  S.dragging=false; canvas.style.cursor='grab';
+  S.resumeId=setTimeout(()=>{ S.spinning=true; },4000);
+});
+
+// ── Zoom ─────────────────────────────────────────────────
+canvas.addEventListener('wheel', e=>{
+  e.preventDefault();
+  proj.scale(Math.max(BR*0.4,Math.min(BR*2.6, proj.scale()-e.deltaY*0.55)));
+},{passive:false});
+
+// ── Hover & click detection ────────────────────────────────
+const tipEl=document.getElementById('tooltip');
+
+function getGeoCoords(e){
+  const rect=canvas.getBoundingClientRect();
+  const mx=e.clientX-rect.left, my=e.clientY-rect.top;
+  const dx=mx-SZ/2, dy=my-SZ/2, r=proj.scale();
+  if(dx*dx+dy*dy>r*r) return null;
+  return proj.invert([mx,my]);
+}
+
+function showTip(e){ tipEl.style.opacity=1; moveTip(e); }
+function moveTip(e){ let tx=e.clientX+18,ty=e.clientY-12; if(tx+175>innerWidth)tx=e.clientX-190; if(ty+75>innerHeight)ty=e.clientY-85; tipEl.style.left=tx+'px'; tipEl.style.top=ty+'px'; }
+function hideTip(){ tipEl.style.opacity=0; }
+
+let lastHoverMs=0;
+canvas.addEventListener('mousemove', e=>{
+  moveTip(e);
+  const now=Date.now(); if(now-lastHoverMs<50) return; // throttle to 20fps
+  lastHoverMs=now;
+  const coords=getGeoCoords(e); if(!coords){ hideTip(); return; }
+  if(S.mode==='political'&&S.polData){
+    const f=S.polData.find(f=>onFront(coords[0],coords[1])&&d3.geoContains(f,coords));
+    if(!f){ hideTip(); return; }
+    const z=f.properties.zone, name=f.properties.tz_name1st||f.properties.time_zone||'';
+    const now2=new Date(),h=((now2.getUTCHours()+Math.round(z))%24+24)%24,m=now2.getUTCMinutes();
+    document.getElementById('tt-name').textContent=f.properties.utc_format||name;
+    document.getElementById('tt-sub').textContent=`${name} · ${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+    showTip(e);
+  } else if(S.mode==='standard'){
+    const off=Math.max(-12,Math.min(14,Math.round(coords[0]/15)));
+    const now2=new Date(),h=((now2.getUTCHours()+off)%24+24)%24,m=now2.getUTCMinutes();
+    document.getElementById('tt-name').textContent=off===0?'UTC ±0':off>0?`UTC +${off}`:`UTC ${off}`;
+    document.getElementById('tt-sub').textContent=`Local: ${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+    showTip(e);
+  }
+});
+canvas.addEventListener('mouseleave', hideTip);
+
+canvas.addEventListener('click', e=>{
+  const coords=getGeoCoords(e);
+  if(!coords){ clearSelection(); return; }
+  if(S.mode==='political'&&S.polData){
+    const f=S.polData.find(f=>onFront(coords[0],coords[1])&&d3.geoContains(f,coords));
+    if(f) selectZone(f); else clearSelection();
+  } else if(S.mode==='standard'){
+    selectZoneByOffset(Math.max(-12,Math.min(14,Math.round(coords[0]/15))));
+  }
+});
+
+// ── Info panel ────────────────────────────────────────────
+function selectZone(feature){
+  const p=feature.properties, off=p.zone, cat=getDateCat(off);
+  const now=new Date();
+  const H=((now.getUTCHours()+Math.round(off))%24+24)%24;
+  const M=now.getUTCMinutes(),Sec=now.getUTCSeconds();
+  const d=new Date(now);
+  if(cat==='tomorrow') d.setUTCDate(d.getUTCDate()+1);
+  if(cat==='yesterday') d.setUTCDate(d.getUTCDate()-1);
+  S.selected={off};
+  document.getElementById('p-name').textContent=p.tz_name1st||p.time_zone||'—';
+  document.getElementById('p-offset').textContent=p.utc_format||`UTC${off>=0?'+':''}${off}`;
+  document.getElementById('p-time').textContent=`${String(H).padStart(2,'0')}:${String(M).padStart(2,'0')}:${String(Sec).padStart(2,'0')}`;
+  document.getElementById('p-date').textContent=`${d.getUTCDate()} ${MO[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+  document.getElementById('p-places').textContent=(p.places||'').split(',').slice(0,3).join(', ');
+  const s=document.getElementById('p-status');
+  s.textContent=cat.charAt(0).toUpperCase()+cat.slice(1); s.className=`panel-daystatus ds-${cat}`;
+  document.getElementById('tz-panel').classList.add('open');
+}
+function selectZoneByOffset(off){
+  selectZone({properties:{zone:off,tz_name1st:`UTC ${off>=0?'+':''}${off}`,utc_format:`UTC${off>=0?'+':''}${off}:00`,places:''}});
+}
+function clearSelection(){ S.selected=null; document.getElementById('tz-panel').classList.remove('open'); }
+function updatePanelTime(){
+  if(!S.selected) return;
+  const {off}=S.selected, cat=getDateCat(off), now=new Date();
+  const H=((now.getUTCHours()+Math.round(off))%24+24)%24;
+  const M=now.getUTCMinutes(),Sec=now.getUTCSeconds();
+  document.getElementById('p-time').textContent=`${String(H).padStart(2,'0')}:${String(M).padStart(2,'0')}:${String(Sec).padStart(2,'0')}`;
+  const d=new Date(now);
+  if(cat==='tomorrow') d.setUTCDate(d.getUTCDate()+1);
+  if(cat==='yesterday') d.setUTCDate(d.getUTCDate()-1);
+  document.getElementById('p-date').textContent=`${d.getUTCDate()} ${MO[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+  const s=document.getElementById('p-status');
+  s.textContent=cat.charAt(0).toUpperCase()+cat.slice(1); s.className=`panel-daystatus ds-${cat}`;
+}
+document.getElementById('panel-close').addEventListener('click', clearSelection);
+
+// ── Mode switching ────────────────────────────────────────
+function setMode(m){
+  S.mode=m;
+  document.getElementById('btn-std').classList.toggle('active',m==='standard');
+  document.getElementById('btn-pol').classList.toggle('active',m==='political');
+  document.getElementById('pol-leg').style.display=m==='political'?'flex':'none';
+  clearSelection();
+  if(m==='political') loadPolitical();
+}
+
+function loadPolitical(){
+  if(S.polLoaded) return;
+  if(S.polLoading) return;
+  S.polLoading=true; showLoad(true);
+  // 50m = ~10x fewer vertices than 10m — massive render speedup
+  fetch('https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_50m_time_zones.geojson')
+    .then(r=>{ if(!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+    .then(data=>{
+      // Pre-compute bounding boxes once for visibility culling
+      data.features.forEach(f=>{ f._bbox = d3.geoBounds(f); });
+      S.polData=data.features; S.polLoaded=true; S.polLoading=false;
+      showLoad(false);
+    })
+    .catch(err=>{
+      S.polLoading=false;
+      showLoad(false,`Could not load timezone data: ${err.message}`);
+      setTimeout(()=>{ showLoad(false); setMode('standard'); },3000);
+    });
+}
+
+// ── Date view ─────────────────────────────────────────────
+function toggleDate(){
+  S.dateView=!S.dateView;
+  const b=document.getElementById('date-btn'),l=document.getElementById('date-legend');
+  b.classList.toggle('active',S.dateView); b.textContent=S.dateView?'Hide Dates':'Show Dates';
+  l.classList.toggle('show',S.dateView);
+  updateDateLegend();
+}
+function updateDateLegend(){
+  const n=new Date(),fmt=d=>`${d.getUTCDate()} ${MO[d.getUTCMonth()]}`;
+  const yd=new Date(n),tm=new Date(n);
+  yd.setUTCDate(n.getUTCDate()-1); tm.setUTCDate(n.getUTCDate()+1);
+  document.getElementById('dl-yd').textContent=fmt(yd);
+  document.getElementById('dl-td').textContent=fmt(n);
+  document.getElementById('dl-tm').textContent=fmt(tm);
+}
+updateDateLegend();
+
+// ── Loading overlay ───────────────────────────────────────
+function showLoad(show,err){
+  const el=document.getElementById('loading'),errEl=document.getElementById('load-err');
+  document.querySelector('.load-txt').style.display=err?'none':'block';
+  document.querySelector('.spinner').style.display=err?'none':'block';
+  errEl.style.display=err?'block':'none'; if(err) errEl.textContent=err;
+  el.classList.toggle('show',show);
+}
+
+// ── Controls ──────────────────────────────────────────────
+document.getElementById('btn-std').addEventListener('click',()=>setMode('standard'));
+document.getElementById('btn-pol').addEventListener('click',()=>setMode('political'));
+document.getElementById('date-btn').addEventListener('click',toggleDate);
+
+// ── Clock (1 Hz, no rendering work) ──────────────────────
+setInterval(()=>{
+  const n=new Date();
+  document.getElementById('utc-clock').textContent=`${String(n.getUTCHours()).padStart(2,'0')}:${String(n.getUTCMinutes()).padStart(2,'0')}:${String(n.getUTCSeconds()).padStart(2,'0')}`;
+  document.getElementById('utc-date').textContent=`${n.getUTCDate()} ${MO[n.getUTCMonth()]} ${n.getUTCFullYear()}`;
+  if(S.dateView) updateDateLegend();
+  updatePanelTime();
+},1000);
+// Immediate first tick
+(()=>{ const n=new Date(); document.getElementById('utc-clock').textContent=`${String(n.getUTCHours()).padStart(2,'0')}:${String(n.getUTCMinutes()).padStart(2,'0')}:${String(n.getUTCSeconds()).padStart(2,'0')}`; document.getElementById('utc-date').textContent=`${n.getUTCDate()} ${MO[n.getUTCMonth()]} ${n.getUTCFullYear()}`; })();
+</script>
+</body>
+</html>
